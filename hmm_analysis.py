@@ -47,7 +47,6 @@ class HMMAnalyzer:
         self.results_dir = None
         self.phi = None
         self.atten = None
-        print("new b")
 
     def load_data_files(self, phi_string: str) -> None:
         """
