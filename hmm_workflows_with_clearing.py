@@ -297,6 +297,24 @@ def clearing_power_sweep_workflow(
     prev_covars = None
 
     for folder in folders:
+        # Check for results file
+        results_files = glob.glob(os.path.join(folder, "results", "analysis_results_*.json"))
+        model_files = glob.glob(os.path.join(base_path, "Models", os.path.basename(folder), "model_*.pkl"))
+        if results_files:
+            print(f"Skipping {folder} (results already exist)")
+            # If model exists, load means/covars for next iteration
+            if model_files:
+                try:
+                    import pickle
+                    with open(sorted(model_files)[-1], "rb") as f:
+                        model = pickle.load(f)
+                    prev_means = model.means_
+                    prev_covars = model.covars_
+                    print(f"  Loaded means/covars from {model_files[-1]}")
+                except Exception as e:
+                    print(f"  Could not load model from {model_files[-1]}: {e}")
+            continue  # Skip already processed
+
         print(f"\nProcessing folder: {folder}")
         bin_files = glob.glob(os.path.join(folder, "*.bin"))
         if not bin_files:

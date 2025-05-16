@@ -455,23 +455,31 @@ class HMMAnalyzer:
         
         # 4. Timeseries slices
         change_indices = np.where(np.diff(states) != 0)[0] + 1
+        n = len(states)
         if len(change_indices) >= 2:
             i = np.random.choice(len(change_indices) - 1)
             j = i + np.random.randint(1, 6)
-            
+            # Clamp all indices to valid range
+            idx_i = int(np.clip(change_indices[i], 0, n-1))
+            idx_ip5 = int(np.clip(change_indices[i]+5, 0, n))
+            idx_j = int(np.clip(change_indices[j], 0, n-1)) if j < len(change_indices) else n-1
             # Short slice around a transition
             try:
-                self._plot_timeseries_slice(states, change_indices[i]-5, change_indices[i]+5,
-                                      "short_transition", results_dir)
+                if idx_i < idx_ip5:
+                    self._plot_timeseries_slice(states, idx_i-5 if idx_i-5 >= 0 else 0, idx_ip5,
+                                          "short_transition", results_dir)
             except Exception as e:
-                self._plot_timeseries_slice(states, change_indices[i], change_indices[i]+5,
-                                      "short_transition", results_dir)
+                if idx_i < idx_ip5:
+                    self._plot_timeseries_slice(states, idx_i, idx_ip5,
+                                          "short_transition", results_dir)
                 print(f"Error plotting short transition: {e}")
-            
             # Longer slice between transitions
-            if i + 1 < len(change_indices):
-                self._plot_timeseries_slice(states, change_indices[i], change_indices[j],
-                                          "between_transitions", results_dir)
+            if i + 1 < len(change_indices) and idx_i < idx_j:
+                try:
+                    self._plot_timeseries_slice(states, idx_i, idx_j,
+                                            "between_transitions", results_dir)
+                except Exception as e:
+                    print(f"Error plotting the longer slice between transitions: {e}")
     
     def _plot_means_and_covars(self, ax: plt.Axes, means: np.ndarray, 
                               covars: np.ndarray, prefix: str) -> None:
