@@ -378,7 +378,7 @@ class HMMAnalyzer:
         
         # Prepare results dictionary
         results = {
-            "DA": int(atten),
+            "DA": int(atten) if atten is not None else None,
             "phi": float(self.phi),
             "mean_occupation": float(mean_occ),
             "probabilities": {f"P{i}": float(prob) for i, prob in enumerate(probs)},
@@ -387,7 +387,7 @@ class HMMAnalyzer:
             "transition_rates_MHz": {f"{i}_{j}": float(rates[i, j])
                             for i in range(self.num_modes)
                             for j in range(self.num_modes)},
-            "attenuation": int(atten),
+            "attenuation": int(atten) if atten is not None else None,
             "num_modes": int(self.num_modes),
             "downSample_rate_MHz": float(self.sample_rate)
         }
@@ -634,7 +634,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
                 gc.collect()
         print(f"Saved all reference plots to {pdf_path}")
 
-    def process_ref_file_by_index(self, ref_files, index, num_modes=2, int_time=2, sample_rate=10):
+    def process_ref_file_by_index(self, ref_files, index, DA, phi, num_modes=2, int_time=2, sample_rate=10):
         """
         Process a single .bin file in ref_files by index using the standard single-power workflow.
         Args:
@@ -663,6 +663,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
         self.attenuations = [None]
         self.data_dir = folder
         self.figure_path = os.path.join(folder, "Figures")
+        self.phi = phi
         os.makedirs(self.figure_path, exist_ok=True)
         # Load and process data
         data_og = qp.loadAlazarData(bin_file)
