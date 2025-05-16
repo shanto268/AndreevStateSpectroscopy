@@ -20,7 +20,8 @@ import seaborn as sns
 
 import quasiparticleFunctions as qp
 from hmm_analysis_with_clearing import HMMAnalyzerWithClearing
-from hmm_utils import create_physics_based_transition_matrix, get_means_covars
+from hmm_utils import (create_physics_based_transition_matrix,
+                       get_means_covars, get_populations_labels)
 
 
 def analyze_flux_sweep_with_clearing(
@@ -274,6 +275,7 @@ def clearing_power_sweep_workflow(
         int_time: integration time
         sample_rate: sample rate in MHz
         analyzer_class: class to use for HMM analysis (should be HMMAnalyzer or subclass)
+    Implements robust resume logic: if interrupted, resumes from the next unprocessed folder using the last model's means/covars.
     """
     if analyzer_class is None:
         from hmm_analysis import HMMAnalyzer
@@ -293,28 +295,45 @@ def clearing_power_sweep_workflow(
         return float('inf')
     folders = sorted(folders, key=extract_power)
 
-    prev_means = None
-    prev_covars = None
-
-    for folder in folders:
-        # Check for results file
-        results_files = glob.glob(os.path.join(folder, "results", "analysis_results_*.json"))
+    # --- Robust resume logic ---
+    last_model_path = None
+    last_means = None
+    last_covars = None
+    first_unprocessed_idx = 0
+    for idx, folder in enumerate(folders):
         model_files = glob.glob(os.path.join(base_path, "Models", os.path.basename(folder), "model_*.pkl"))
-        if results_files:
-            print(f"Skipping {folder} (results already exist)")
-            # If model exists, load means/covars for next iteration
-            if model_files:
-                try:
-                    import pickle
-                    with open(sorted(model_files)[-1], "rb") as f:
-                        model = pickle.load(f)
-                    prev_means = model.means_
-                    prev_covars = model.covars_
-                    print(f"  Loaded means/covars from {model_files[-1]}")
-                except Exception as e:
-                    print(f"  Could not load model from {model_files[-1]}: {e}")
-            continue  # Skip already processed
+        results_files = glob.glob(os.path.join(base_path, "Results", os.path.basename(folder), "analysis_*.json"))
+        if model_files and results_files:
+            last_model_path = sorted(model_files)[-1]
+            first_unprocessed_idx = idx + 1
+        else:
+            break  # Found the first unprocessed folder
 
+    if first_unprocessed_idx >= len(folders):
+        print("All folders already processed. Nothing to do.")
+        return
+
+    # If at least one folder is processed, load last means/covars
+    if last_model_path is not None:
+        try:
+            import pickle
+            with open(last_model_path, "rb") as f:
+                model = pickle.load(f)
+            last_means = model.means_
+            last_covars = model.covars_
+            print(f"Resuming from {folders[first_unprocessed_idx]} using means/covars from {last_model_path}")
+        except Exception as e:
+            print(f"Could not load model from {last_model_path}: {e}")
+            print("Falling back to human input for means/covars on next folder.")
+            last_means = None
+            last_covars = None
+    else:
+        print("No processed folders found. Will prompt for human input on first folder.")
+
+    prev_means = last_means
+    prev_covars = last_covars
+
+    for folder in folders[first_unprocessed_idx:]:
         print(f"\nProcessing folder: {folder}")
         bin_files = glob.glob(os.path.join(folder, "*.bin"))
         if not bin_files:
@@ -329,11 +348,10 @@ def clearing_power_sweep_workflow(
             data_og, int_time, sample_rate, returnRate=True
         )
         data_mV = qp.uint16_to_mV(data_downsample)
-        # Memory cleanup
         del data_og
         del data_downsample
 
-        # User input for means/covars on first file, else use previous
+        # Use last means/covars if available, else prompt for human input
         if prev_means is None or prev_covars is None:
             result = get_means_covars(data_mV, num_modes)
             means_guess = result['means']
@@ -343,8 +361,8 @@ def clearing_power_sweep_workflow(
         else:
             means_guess = prev_means
             covars_guess = prev_covars
+            populations, labels = get_populations_labels(data_mV, num_modes, means_guess, covars_guess)
 
-        # Create analyzer and run HMM
         analyzer = analyzer_class(folder, num_modes=num_modes)
         analyzer.data_files = [bin_file]
         analyzer.data = data_mV
@@ -355,7 +373,6 @@ def clearing_power_sweep_workflow(
         logprob, states = analyzer.decode_states()
         mean_occ, probs = analyzer.calculate_occupation_probabilities(states)
 
-        # Save model and results
         folder_name = os.path.basename(folder)
         uid = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_dir = os.path.join(base_path, "Models", folder_name)
@@ -365,21 +382,16 @@ def clearing_power_sweep_workflow(
         os.makedirs(results_dir, exist_ok=True)
         os.makedirs(figures_dir, exist_ok=True)
 
-        # Save model
         model_path = os.path.join(model_dir, f"model_{uid}.pkl")
         with open(model_path, "wb") as f:
             pickle.dump(analyzer.model, f)
         print(f"  Saved model to {model_path}")
-        # Save results and figures
         save_full_analysis(
             analyzer, states, means_guess, covars_guess, labels, populations, results_dir, figures_dir, uid, atten
         )
 
-        # Prepare for next iteration
         prev_means = analyzer.model.means_
         prev_covars = analyzer.model.covars_
-
-        # Memory cleanup
         del data_mV
         del analyzer
         gc.collect()
