@@ -21,7 +21,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Ellipse
 
 import quasiparticleFunctions as qp
-from hmm_utils import create_physics_based_transition_matrix, get_means_covars
+from hmm_utils import (create_physics_based_transition_matrix,
+                       get_means_covars, plot_gmm_results)
 
 
 class HMMAnalyzer:
@@ -421,24 +422,33 @@ class HMMAnalyzer:
         # 1. Histogram of processed data
         plt.figure(figsize=(10, 8))
         qp.plotComplexHist(self.data[0], self.data[1], figsize=[10, 8])
-        plt.title(f"Phi: {self.phi} | DA: {self.atten} dB | Integration Time: {self.int_time} μs")
+        try:
+            plt.title(f"Phi: {self.phi} | DA: {self.atten} dB | Integration Time: {self.int_time} μs")
+        except:
+            plt.title("Phi: None | DA: None | Integration Time: None μs")
         plt.savefig(os.path.join(results_dir, "data_histogram.png"))
         plt.close()
         
         # 2. Data with initial means and covariances
         if means_guess is not None and covars_guess is not None:
-            plt.figure(figsize=(10, 8))
-            ax = qp.plotComplexHist(self.data[0], self.data[1], figsize=[10, 8])
-            self._plot_means_and_covars(ax, means_guess, covars_guess, "Initial")
-            plt.savefig(os.path.join(results_dir, "data_with_initial_parameters.png"))
-            plt.close()
+            result_guess = {
+                'means': means_guess,
+                'covariances': covars_guess,
+                'labels': None,
+                'populations': None,
+                'model': None
+            }
+            plot_gmm_results(self.data, result_guess, title="Initial Means and Covariances", save_path=os.path.join(results_dir, "data_with_initial_parameters.png"), show=False)
         
         # 3. Data with trained means and covariances
-        plt.figure(figsize=(10, 8))
-        ax = qp.plotComplexHist(self.data[0], self.data[1], figsize=[10, 8])
-        self._plot_means_and_covars(ax, self.model.means_, self.model.covars_, "Trained")
-        plt.savefig(os.path.join(results_dir, "data_with_trained_parameters.png"))
-        plt.close()
+        result_trained = {
+            'means': self.model.means_,
+            'covariances': self.model.covars_,
+            'labels': None,
+            'populations': None,
+            'model': self.model
+        }
+        plot_gmm_results(self.data, result_trained, title="Trained Means and Covariances", save_path=os.path.join(results_dir, "data_with_trained_parameters.png"), show=False)
         
         # 4. Timeseries slices
         change_indices = np.where(np.diff(states) != 0)[0] + 1
@@ -666,6 +676,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
         self.data_files = [bin_file]
         self.attenuations = [None]
         self.data_dir = folder
+        self.int_time = int_time
         self.figure_path = os.path.join(folder, "Figures")
         self.phi = phi
         os.makedirs(self.figure_path, exist_ok=True)
@@ -694,7 +705,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
         )
         os.makedirs(save_dir, exist_ok=True)
         self.results_dir = save_dir
-        self.save_analysis_results(states, None, means_guess, covars_guess)
+        self.save_analysis_results(states, DA, means_guess, covars_guess)
         # Calculate SNRs
         snrs = self.calculate_snrs()
         print("SNRs:", snrs)
