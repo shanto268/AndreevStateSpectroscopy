@@ -407,6 +407,10 @@ class HMMAnalyzer:
         # Save model
         self.save_model(f"model_{self.num_modes}_modes.pkl")
         
+    def _get_int_time(self):
+        """Safely get int_time attribute or return None if not set."""
+        return getattr(self, 'int_time', 2)
+
     def _save_analysis_plots(self, results_dir: str, states: np.ndarray,
                            means_guess: Optional[np.ndarray] = None,
                            covars_guess: Optional[np.ndarray] = None) -> None:
@@ -423,8 +427,9 @@ class HMMAnalyzer:
         plt.figure(figsize=(10, 8))
         qp.plotComplexHist(self.data[0], self.data[1], figsize=[10, 8])
         try:
-            plt.title(f"Phi: {self.phi} | DA: {self.atten} dB | Integration Time: {self.int_time} μs")
-        except:
+            int_time_val = self._get_int_time()
+            plt.title(f"Phi: {self.phi} | DA: {self.atten} dB | Integration Time: {int_time_val} μs")
+        except Exception:
             plt.title("Phi: None | DA: None | Integration Time: None μs")
         plt.savefig(os.path.join(results_dir, "data_histogram.png"))
         plt.close()
@@ -551,6 +556,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
             self.data_dir = folder
             self.figure_path = os.path.join(folder, "Figures")
             os.makedirs(self.figure_path, exist_ok=True)
+            self.int_time = int_time  # Ensure int_time is set
 
             # Load and process data
             data_og = qp.loadAlazarData(bin_file)
@@ -676,7 +682,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
         self.data_files = [bin_file]
         self.attenuations = [None]
         self.data_dir = folder
-        self.int_time = int_time
+        self.int_time = int_time  # Ensure int_time is set
         self.figure_path = os.path.join(folder, "Figures")
         self.phi = phi
         os.makedirs(self.figure_path, exist_ok=True)

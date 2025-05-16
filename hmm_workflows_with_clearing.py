@@ -310,6 +310,9 @@ def clearing_power_sweep_workflow(
             data_og, int_time, sample_rate, returnRate=True
         )
         data_mV = qp.uint16_to_mV(data_downsample)
+        # Memory cleanup
+        del data_og
+        del data_downsample
 
         # User input for means/covars on first file, else use previous
         if prev_means is None or prev_covars is None:
@@ -357,8 +360,6 @@ def clearing_power_sweep_workflow(
         prev_covars = analyzer.model.covars_
 
         # Memory cleanup
-        del data_og
-        del data_downsample
         del data_mV
         del analyzer
         gc.collect()
