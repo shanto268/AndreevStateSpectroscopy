@@ -1467,3 +1467,146 @@ def get_means_covars_drag(
             plt.close(fig)
     plot_gmm_results_with_user_ellipses(data, result)
     return result
+
+def compress_and_delete_folder(folder_path: str) -> str:
+    """
+    Compress a folder into a zip file and delete the original folder if successful.
+    
+    Parameters
+    ----------
+    folder_path : str
+        Path to the folder to be compressed and deleted
+        
+    Returns
+    -------
+    str
+        Path to the created zip file
+        
+    Raises
+    ------
+    FileNotFoundError
+        If the folder doesn't exist
+    PermissionError
+        If there are permission issues
+    OSError
+        For other operating system related errors
+    """
+    import os
+    import shutil
+    from pathlib import Path
+
+    # Convert to Path object for better path handling
+    folder_path = Path(folder_path)
+    
+    if not folder_path.exists():
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
+    
+    if not folder_path.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {folder_path}")
+    
+    # Create zip file path (same name as folder but with .zip extension)
+    zip_path = folder_path.with_suffix('.zip')
+    
+    try:
+        # Create the zip file
+        shutil.make_archive(
+            str(zip_path.with_suffix('')),  # Remove .zip as make_archive adds it
+            'zip',
+            folder_path.parent,
+            folder_path.name
+        )
+        
+        # Verify the zip file was created successfully
+        if not zip_path.exists():
+            raise OSError("Failed to create zip file")
+        
+        # Delete the original folder
+        shutil.rmtree(folder_path)
+        
+        return str(zip_path)
+        
+    except Exception as e:
+        # If anything fails, try to clean up the zip file if it was created
+        if zip_path.exists():
+            try:
+                zip_path.unlink()
+            except:
+                pass
+        raise e
+
+def process_bad_datasets_parallel(base_path: str, bad_datasets: dict, num_processes: int = None) -> None:
+    """
+    Process multiple folders in parallel using multiprocessing.
+    
+    Parameters
+    ----------
+    base_path : str
+        Base path where the folders are located
+    bad_datasets : dict
+        Dictionary mapping frequencies to lists of attenuation values
+    num_processes : int, optional
+        Number of parallel processes to use. If None, uses CPU count - 1
+    """
+    import multiprocessing as mp
+    import os
+    from pathlib import Path
+    
+    def process_single_folder(folder_path: str) -> tuple[str, bool]:
+        """Helper function to process a single folder and return success status"""
+        try:
+            zip_path = compress_and_delete_folder(folder_path)
+            return (folder_path, True)
+        except Exception as e:
+            print(f"Error processing {folder_path}: {e}")
+            return (folder_path, False)
+    
+    # Convert base path to Path object
+    base_path = Path(base_path)
+    
+    # Prepare list of all folders to process
+    folders_to_process = []
+    for freq, attens in bad_datasets.items():
+        for atten in attens:
+            # Construct folder path
+            folder_name = f"clearing_{freq}GHz_{atten}p0dBm"
+            folder_path = base_path / f"phi_0p490" / f"DA30_SR10" / folder_name
+            if folder_path.exists():
+                folders_to_process.append(str(folder_path))
+    
+    if not folders_to_process:
+        print("No folders found to process!")
+        return
+    
+    print(f"Found {len(folders_to_process)} folders to process")
+    
+    # Determine number of processes
+    if num_processes is None:
+        num_processes = max(1, mp.cpu_count() - 1)
+    
+    # Process folders in parallel
+    with mp.Pool(processes=num_processes) as pool:
+        results = pool.map(process_single_folder, folders_to_process)
+    
+    # Report results
+    successful = [path for path, success in results if success]
+    failed = [path for path, success in results if not success]
+    
+    print(f"\nProcessing complete!")
+    print(f"Successfully processed: {len(successful)} folders")
+    if failed:
+        print(f"Failed to process: {len(failed)} folders")
+        for path in failed:
+            print(f"  - {path}")
+
+# Example usage:
+if __name__ == "__main__":
+    # Example bad datasets dictionary
+    bad_datasets = {
+        "9.5": [-7,-6,-5],
+        "8": [-5],
+        "7.5": [-5, -6, -7, -8, -9, -10, -11, -12, -13, -14, -15, -16, -17, -18, -19],
+        "7": [-5, -6, -7, -8, -9, -10, -11, -12, -13, -14, -15],
+        "6.5": [-5, -6, -7, -8, -9, -10, -11, -12, -13, -14, -15, -16, -17, -18, -19, -20, -21],
+    }
+    
+    # Base path where the folders are located
