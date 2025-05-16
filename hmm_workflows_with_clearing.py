@@ -352,7 +352,6 @@ def clearing_power_sweep_workflow(
         with open(model_path, "wb") as f:
             pickle.dump(analyzer.model, f)
         print(f"  Saved model to {model_path}")
-
         # Save results and figures
         save_full_analysis(
             analyzer, states, means_guess, covars_guess, labels, populations, results_dir, figures_dir, uid, atten

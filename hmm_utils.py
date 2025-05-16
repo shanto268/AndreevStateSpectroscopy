@@ -1199,6 +1199,36 @@ def get_means_covars(
     
     return result
 
+def get_populations_labels(
+    data: np.ndarray,
+    num_modes: int,
+    means: np.ndarray,
+    covariances: np.ndarray):
+    
+    # Check data shape and transpose if needed
+    if data.shape[0] == 2 and data.shape[1] > 2:
+        # Data is in (n_features, n_samples) format, transpose it
+        data = data.T
+    elif data.shape[1] == 2 and data.shape[0] > 2:
+        # Data is already in (n_samples, n_features) format
+        pass
+    else:
+        raise ValueError(f"Data shape {data.shape} is invalid. Must be either (2, n_samples) or (n_samples, 2)")
+    
+    # Calculate distances to all points
+    distances = np.zeros((data.shape[0], num_modes))
+    for i in range(num_modes):
+        distances[:, i] = np.sum((data - means[i])**2, axis=1)
+    
+    # Assign points to nearest center
+    labels = np.argmin(distances, axis=1)
+    
+    # Calculate populations
+    populations = np.zeros(num_modes, dtype=int)
+    for i in range(num_modes):
+        populations[i] = np.sum(labels == i)
+    return populations, labels
+
 def find_atten_file_index(files: List[str], target_atten: int) -> int:
     """
     Find the index of a file with a specific attenuation value.
@@ -1237,29 +1267,6 @@ def find_atten_file_index(files: List[str], target_atten: int) -> int:
                 return i
     
     return -1  # Return -1 if no match found
-
-# Example usage
-if __name__ == "__main__":
-    # Generate some example data
-    np.random.seed(42)
-    n_samples = 10000
-    
-    # Generate data from 3 different Gaussian distributions
-    data1 = np.random.randn(n_samples // 3, 2) + np.array([2, 2])
-    data2 = np.random.randn(n_samples // 3, 2) + np.array([-2, -2])
-    data3 = np.random.randn(n_samples // 3, 2) + np.array([0, 0])
-    
-    # Combine the data
-    data = np.vstack([data1, data2, data3])
-    
-    # Fit the GMM
-    result = fit_gmm(data, 3)
-    
-    # Plot the results
-    plot_gmm_results(data, result)
-    
-    # Print the parameters
-    print_gmm_parameters(result) 
 
 class EllipseDragger:
     def __init__(self, ax, center, initial_radius=1.0):
@@ -1712,3 +1719,43 @@ def compress_and_delete_folders_from_list(folder_list, num_processes=None, test=
         for path in failed:
             print(f"  - {path}")
     print(f"Total storage saved: {storage_saved_gb:.2f} GB")
+
+def plot_blobs_with_ellipses(
+    data: np.ndarray,
+    gmm_result: Dict[str, Any],
+    num_modes: int = None,
+    title: str = 'I-Q Data with Gaussian Mixture Model\nMeans and 2σ Covariance Ellipses',
+    xlabel: str = 'I [mV]',
+    ylabel: str = 'Q [mV]',
+    bins: int = 80,
+    cmap: str = 'Greys',
+    figsize: Tuple[int, int] = (10, 10),
+    save_path: Optional[str] = None,
+    show: bool = True
+) -> None:
+    """
+    Preprocess data and plot GMM results, including closing figures, setting backend, transposing data, and plotting initial histogram.
+    """
+    # Close any existing figures first
+    plt.close('all')
+    # Start with inline backend for initial plot
+    set_plotting_backend('inline')
+    # Check data shape and transpose if needed
+    if data.shape[0] == 2 and data.shape[1] > 2:
+        data = data.T
+    elif data.shape[1] == 2 and data.shape[0] > 2:
+        pass
+    else:
+        raise ValueError(f"Data shape {data.shape} is invalid. Must be either (2, n_samples) or (n_samples, 2)")
+    # Create figure for mode selection
+    plt.figure(figsize=(12, 10))
+    h = plt.hist2d(data[:, 0], data[:, 1], bins=bins, norm=LogNorm(), cmap=cmap)
+    plt.colorbar(h[3], shrink=0.9, extend='both')
+    if num_modes is not None:
+        plt.title(f"{title}\nSelect {num_modes} mode centers")
+    else:
+        plt.title(title)
+    plt.grid(True, alpha=0.3)
+    plt.gca().set_aspect('equal')
+    plt.close('all')
+    plot_gmm_results(data, gmm_result, title=title, xlabel=xlabel, ylabel=ylabel, bins=bins, cmap=cmap, figsize=figsize, save_path=save_path, show=show)

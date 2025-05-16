@@ -22,7 +22,8 @@ from matplotlib.patches import Ellipse
 
 import quasiparticleFunctions as qp
 from hmm_utils import (create_physics_based_transition_matrix,
-                       get_means_covars, plot_gmm_results)
+                       get_means_covars, get_populations_labels,
+                       plot_blobs_with_ellipses)
 
 
 class HMMAnalyzer:
@@ -251,7 +252,7 @@ class HMMAnalyzer:
             'model': self.model
         }
         save_path = os.path.join(self.results_dir, f"{plot_name}.png")
-        plot_gmm_results(
+        plot_blobs_with_ellipses(
             self.data,
             gmm_result,
             title="I-Q Data with Gaussian Mixture Model\nMeans and 2σ Covariance Ellipses",
@@ -438,13 +439,11 @@ class HMMAnalyzer:
                 'populations': populations,
                 'model': None
             }
-            plot_gmm_results(self.data, result_guess, title="Initial Means and Covariances", save_path=os.path.join(results_dir, "data_with_initial_parameters.png"), show=False)
+            plot_blobs_with_ellipses(self.data, result_guess, title="Initial Means and Covariances", save_path=os.path.join(results_dir, "data_with_initial_parameters.png"), show=False)
         
         # 3. Data with trained means and covariances
-        labels = self.model.predict(self.data)
-        populations = np.zeros(self.model.means_.shape[0], dtype=int)
-        for i in range(self.model.means_.shape[0]):
-            populations[i] = np.sum(labels == i)
+        populations, labels = get_populations_labels(self.data, self.num_modes, self.model.means_, self.model.covars_)
+
         result_trained = {
             'means': self.model.means_,
             'covariances': self.model.covars_,
@@ -452,7 +451,7 @@ class HMMAnalyzer:
             'populations': populations,
             'model': self.model
         }
-        plot_gmm_results(self.data, result_trained, title="Trained Means and Covariances", save_path=os.path.join(results_dir, "data_with_trained_parameters.png"), show=False)
+        plot_blobs_with_ellipses(self.data, result_trained, title="Trained Means and Covariances", save_path=os.path.join(results_dir, "data_with_trained_parameters.png"), show=False)
         
         # 4. Timeseries slices
         change_indices = np.where(np.diff(states) != 0)[0] + 1
