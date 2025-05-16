@@ -584,7 +584,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
             ref_files: list of folder paths, each containing a .bin file
             int_time: integration time in microseconds
             sample_rate: sample rate in MHz
-        For each folder in ref_files, load the .bin file, plot self.data, and save all plots to a single PDF.
+        For each folder in ref_files, load the .bin file, plot a 2D I-Q histogram, and save all plots to a single PDF.
         The plot title will be the folder name (e.g., no_clearing_REF_for_10p00GHz).
         The PDF will be saved in .../Figures/RefFiles with a unique timestamped filename.
         """
@@ -611,14 +611,16 @@ class RefHMMAnalyzer(HMMAnalyzer):
                         data_og, int_time, sample_rate, returnRate=True
                 )
                 self.data = qp.uint16_to_mV(data_downsample)
-                # Plot
-                plt.figure(figsize=(10, 6))
-                plt.plot(self.data[0], label='I')
-                plt.plot(self.data[1], label='Q')
+                # 2D I-Q histogram plot
+                plt.figure(figsize=(12, 10))
+                h = plt.hist2d(self.data[0], self.data[1], bins=80, 
+                               norm=plt.matplotlib.colors.LogNorm(), cmap='Greys')
+                plt.colorbar(h[3], shrink=0.9, extend='both')
                 plt.title(os.path.basename(folder))
-                plt.xlabel("Sample")
-                plt.ylabel("mV")
-                plt.legend()
+                plt.xlabel("I [mV]")
+                plt.ylabel("Q [mV]")
+                plt.grid(True, alpha=0.3)
+                plt.gca().set_aspect('equal')
                 plt.tight_layout()
                 pdf.savefig()
                 plt.close()
