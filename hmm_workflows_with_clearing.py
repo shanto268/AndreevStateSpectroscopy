@@ -5,9 +5,12 @@ This module provides workflow functions for analyzing Andreev state spectroscopy
 with clearing tones using Hidden Markov Models (HMM).
 """
 
+import gc
 import glob
+import json
 import os
 import pickle
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -250,3 +253,179 @@ def plot_bootstrap_summary_with_clearing(
         if save_path:
             plt.savefig(os.path.join(fig_dir, "snrs_vs_clearing_power.png"))
         plt.close() 
+
+def clearing_power_sweep_workflow(
+    base_path,
+    clearing_data_dict,
+    selected_freq,
+    num_modes=2,
+    int_time=2,
+    sample_rate=10,
+    analyzer_class=None
+):
+    """
+    Workflow for sweeping through clearing powers at a selected frequency.
+    Args:
+        base_path: root directory
+        clearing_data_dict: dict mapping freq (float) to list of folder paths
+        selected_freq: frequency (float) to process
+        num_modes: number of HMM modes
+        int_time: integration time
+        sample_rate: sample rate in MHz
+        analyzer_class: class to use for HMM analysis (should be HMMAnalyzer or subclass)
+    """
+    if analyzer_class is None:
+        from hmm_analysis import HMMAnalyzer
+        analyzer_class = HMMAnalyzer
+
+    folders = clearing_data_dict.get(selected_freq, [])
+    if not folders:
+        print(f"No folders found for frequency {selected_freq}")
+        return
+
+    # Sort folders by power (extract from folder name)
+    def extract_power(folder):
+        import re
+        m = re.search(r'_(\-?\d+)p(\d+)dBm', folder)
+        if m:
+            return float(f"{m.group(1)}.{m.group(2)}")
+        return float('inf')
+    folders = sorted(folders, key=extract_power)
+
+    prev_means = None
+    prev_covars = None
+
+    for folder in folders:
+        print(f"\nProcessing folder: {folder}")
+        bin_files = glob.glob(os.path.join(folder, "*.bin"))
+        if not bin_files:
+            print(f"  No .bin file found in {folder}, skipping.")
+            continue
+        bin_file = bin_files[0]
+        print(f"  Using .bin file: {bin_file}")
+
+        # Load and process data
+        data_og = qp.loadAlazarData(bin_file)
+        data_downsample, sample_rate_actual = qp.BoxcarDownsample(
+            data_og, int_time, sample_rate, returnRate=True
+        )
+        data_mV = qp.uint16_to_mV(data_downsample)
+
+        # User input for means/covars on first file, else use previous
+        if prev_means is None or prev_covars is None:
+            result = get_means_covars(data_mV, num_modes)
+            means_guess = result['means']
+            covars_guess = result['covariances']
+        else:
+            means_guess = prev_means
+            covars_guess = prev_covars
+
+        # Create analyzer and run HMM
+        analyzer = analyzer_class(folder, num_modes=num_modes)
+        analyzer.data_files = [bin_file]
+        analyzer.data = data_mV
+        analyzer.sample_rate = sample_rate_actual
+
+        analyzer.initialize_model(means_guess, covars_guess)
+        analyzer.fit_model()
+        logprob, states = analyzer.decode_states()
+        mean_occ, probs = analyzer.calculate_occupation_probabilities(states)
+
+        # Save model and results
+        folder_name = os.path.basename(folder)
+        uid = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_dir = os.path.join(base_path, "Models", folder_name)
+        results_dir = os.path.join(base_path, "Results", folder_name)
+        figures_dir = os.path.join(base_path, "Figures", folder_name)
+        os.makedirs(model_dir, exist_ok=True)
+        os.makedirs(results_dir, exist_ok=True)
+        os.makedirs(figures_dir, exist_ok=True)
+
+        # Save model
+        model_path = os.path.join(model_dir, f"model_{uid}.pkl")
+        with open(model_path, "wb") as f:
+            pickle.dump(analyzer.model, f)
+        print(f"  Saved model to {model_path}")
+
+        # Save results and figures
+        save_full_analysis(
+            analyzer, states, means_guess, covars_guess, results_dir, figures_dir, uid, atten=extract_power(folder)
+        )
+
+        # Prepare for next iteration
+        prev_means = analyzer.model.means_
+        prev_covars = analyzer.model.covars_
+
+        # Memory cleanup
+        del data_og
+        del data_downsample
+        del data_mV
+        del analyzer
+        gc.collect()
+
+    print("\nWorkflow complete.")
+
+def save_full_analysis(
+    analyzer, states, means_guess, covars_guess, results_dir, figures_dir, uid, atten=None
+):
+    """
+    Save all analysis results, plots, and model for a single run.
+    """
+    # Calculate all metrics
+    mean_occ, probs = analyzer.calculate_occupation_probabilities(states)
+    snrs = analyzer.calculate_snrs()
+    rates = analyzer.calculate_transition_rates()
+    results = {
+        "DA": int(atten) if atten is not None else None,
+        "mean_occupation": float(mean_occ),
+        "probabilities": {f"P{i}": float(prob) for i, prob in enumerate(probs)},
+        "snrs": {f"SNR_{i}_{j}": float(snr)
+                 for (i, j), snr in zip(analyzer._generate_snr_pairs(), snrs)},
+        "transition_rates_MHz": {f"{i}_{j}": float(rates[i, j])
+                                for i in range(analyzer.num_modes)
+                                for j in range(analyzer.num_modes)},
+        "attenuation": int(atten) if atten is not None else None,
+        "num_modes": int(analyzer.num_modes),
+        "downSample_rate_MHz": float(analyzer.sample_rate)
+    }
+    # Save results to JSON
+    with open(os.path.join(results_dir, f"analysis_results_{uid}.json"), "w") as f:
+        json.dump(results, f, indent=4)
+
+    # Save figures
+    # 1. Histogram of processed data
+    plt.figure(figsize=(10, 8))
+    qp.plotComplexHist(analyzer.data[0], analyzer.data[1], figsize=[10, 8])
+    plt.title(f"DA: {atten} dB | Integration Time: {getattr(analyzer, 'int_time', '?')} μs")
+    plt.savefig(os.path.join(figures_dir, f"data_histogram_{uid}.png"))
+    plt.close()
+
+    # 2. Data with initial means and covariances
+    if means_guess is not None and covars_guess is not None:
+        plt.figure(figsize=(10, 8))
+        ax = qp.plotComplexHist(analyzer.data[0], analyzer.data[1], figsize=[10, 8])
+        analyzer._plot_means_and_covars(ax, means_guess, covars_guess, "Initial")
+        plt.savefig(os.path.join(figures_dir, f"data_with_initial_parameters_{uid}.png"))
+        plt.close()
+
+    # 3. Data with trained means and covariances
+    plt.figure(figsize=(10, 8))
+    ax = qp.plotComplexHist(analyzer.data[0], analyzer.data[1], figsize=[10, 8])
+    analyzer._plot_means_and_covars(ax, analyzer.model.means_, analyzer.model.covars_, "Trained")
+    plt.savefig(os.path.join(figures_dir, f"data_with_trained_parameters_{uid}.png"))
+    plt.close()
+
+    # 4. Timeseries slices (optional, as in your code)
+    change_indices = np.where(np.diff(states) != 0)[0] + 1
+    if len(change_indices) >= 2:
+        i = np.random.choice(len(change_indices) - 1)
+        j = i + np.random.randint(1, 6)
+        try:
+            analyzer._plot_timeseries_slice(states, change_indices[i]-5, change_indices[i]+5,
+                                      f"short_transition_{uid}", figures_dir)
+        except Exception as e:
+            analyzer._plot_timeseries_slice(states, change_indices[i], change_indices[i]+5,
+                                      f"short_transition_{uid}", figures_dir)
+        if i + 1 < len(change_indices):
+            analyzer._plot_timeseries_slice(states, change_indices[i], change_indices[j],
+                                      f"between_transitions_{uid}", figures_dir)

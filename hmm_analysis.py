@@ -696,6 +696,134 @@ class RefHMMAnalyzer(HMMAnalyzer):
         del self.data
         gc.collect()
 
+    def plot_all_ref_means(self, ref_files, int_time=2, sample_rate=10, point_size=100, cmap='viridis'):
+        """
+        Create a single plot showing the mean I,Q values for each reference file, 
+        colored by the frequency value extracted from the folder name.
+        
+        Args:
+            ref_files: list of folder paths, each containing a .bin file
+            int_time: integration time in microseconds
+            sample_rate: sample rate in MHz
+            point_size: size of the scatter points
+            cmap: colormap to use for frequency values
+        
+        The plot will be saved in .../Figures/RefFiles with a unique timestamped filename.
+        Folder names are expected to have the format "*_for_XXpYYGHz" where XXpYY is the frequency.
+        """
+        # Set up save directory
+        save_dir = os.path.join(
+            os.path.dirname(os.path.dirname(ref_files[0])),  # up two levels from a ref file
+            "Figures", "RefFiles"
+        )
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Unique filename
+        uid = datetime.now().strftime("%H%M%S-%m%d%Y")
+        png_path = os.path.join(save_dir, f"ref_means_map_{uid}.png")
+        
+        # Prepare the figure
+        plt.figure(figsize=(14, 12))
+        
+        # Arrays to store data for colorbar
+        all_means_I = []
+        all_means_Q = []
+        all_freqs = []
+        all_labels = []
+        
+        # Process each folder
+        for folder in ref_files:
+            bin_files = glob.glob(os.path.join(folder, "*.bin"))
+            if not bin_files:
+                print(f"No .bin file found in {folder}")
+                continue
+            
+            # Extract frequency from folder name
+            try:
+                folder_basename = os.path.basename(folder)
+                if "for_" in folder_basename and "GHz" in folder_basename:
+                    freq_str = folder_basename.split("for_")[1].split("GHz")[0]
+                    frequency = float(freq_str.replace("p", "."))
+                else:
+                    print(f"Could not extract frequency from folder name: {folder_basename}")
+                    frequency = len(all_freqs)  # Use index as fallback
+                
+                # Load and process data
+                bin_file = bin_files[0]
+                data_og = qp.loadAlazarData(bin_file)
+                data_downsample, _ = qp.BoxcarDownsample(
+                    data_og, int_time, sample_rate, returnRate=True
+                )
+                data = qp.uint16_to_mV(data_downsample)
+                
+                # Calculate mean I and Q values
+                mean_I = np.mean(data[0])
+                mean_Q = np.mean(data[1])
+                
+                # Store values for plotting
+                all_means_I.append(mean_I)
+                all_means_Q.append(mean_Q)
+                all_freqs.append(frequency)
+                all_labels.append(folder_basename)
+                
+                # Free memory
+                del data_og
+                del data_downsample
+                del data
+                gc.collect()
+                
+            except Exception as e:
+                print(f"Error processing {folder}: {e}")
+        
+        # Convert to numpy arrays for plotting
+        all_means_I = np.array(all_means_I)
+        all_means_Q = np.array(all_means_Q)
+        all_freqs = np.array(all_freqs)
+        
+        # Create scatter plot with frequency-based coloring
+        scatter = plt.scatter(all_means_I, all_means_Q, 
+                            c=all_freqs, 
+                            cmap=cmap, 
+                            s=point_size, 
+                            alpha=0.8,
+                            edgecolors='k')
+        
+        # Add colorbar
+        cbar = plt.colorbar(scatter, shrink=0.85)
+        cbar.set_label('Frequency (GHz)', fontsize=12)
+        
+        # Add labels for each point
+        for i, label in enumerate(all_labels):
+            plt.annotate(f"{all_freqs[i]:.2f} GHz", 
+                        (all_means_I[i], all_means_Q[i]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=9)
+        
+        # Plot formatting
+        plt.xlabel("I [mV]", fontsize=14)
+        plt.ylabel("Q [mV]", fontsize=14)
+        plt.title("Reference File Means by Frequency", fontsize=16)
+        plt.grid(True, alpha=0.3)
+        plt.gca().set_aspect('equal')
+        
+        # Add some padding to the plot
+        x_range = np.max(all_means_I) - np.min(all_means_I)
+        y_range = np.max(all_means_Q) - np.min(all_means_Q)
+        padding = 0.1 * max(x_range, y_range)
+        plt.xlim(np.min(all_means_I) - padding, np.max(all_means_I) + padding)
+        plt.ylim(np.min(all_means_Q) - padding, np.max(all_means_Q) + padding)
+        
+        # Save the figure
+        plt.tight_layout()
+        plt.savefig(png_path, dpi=300)
+        plt.close()
+        
+        print(f"Saved reference means map to {png_path}")
+        
+        # Return the path to the saved file
+        return png_path
+
 def main():
     """Example usage of the HMMAnalyzer class."""
     # Initialize analyzer
