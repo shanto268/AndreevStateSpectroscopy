@@ -361,10 +361,13 @@ class HMMAnalyzer:
         if self.data_files is None or self.model is None:
             raise ValueError("No data or model available. Load data and fit model first.")
             
-        # Get the directory of the current data file
-        current_file = self.data_files[self.find_atten_file_index(atten)]
         uid = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_dir = os.path.join(os.path.dirname(current_file), "results", f"{uid}")
+        if atten is not None and self.attenuations is not None:
+            current_file = self.data_files[self.find_atten_file_index(atten)]
+            results_dir = os.path.join(os.path.dirname(current_file), "results", f"{uid}")
+        else:
+            current_file = self.data_files[0]
+            results_dir = os.path.join(os.path.dirname(current_file), "results", f"{uid}")
         os.makedirs(results_dir, exist_ok=True)
         self.results_dir = results_dir
         
