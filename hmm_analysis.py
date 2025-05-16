@@ -228,50 +228,41 @@ class HMMAnalyzer:
         
     def plot_complex_histogram(self, plot_name: str = "complex_histogram") -> None:
         """
-        Plot and save complex histogram with means and covariance ellipses.
-        
+        Plot and save complex histogram with means and covariance ellipses, using the same style as plot_gmm_results.
         Args:
             plot_name: Name for the saved plot file
         """
-        fig, ax = plt.subplots(figsize=(12, 10))
-        ax = qp.plotComplexHist(self.data[0], self.data[1], figsize=[14, 14])
-        
-        # Calculate dynamic limits with some padding
-        x_min = min(self.data[0].min(), self.model.means_[:, 0].min())
-        x_max = max(self.data[0].max(), self.model.means_[:, 0].max())
-        y_min = min(self.data[1].min(), self.model.means_[:, 1].min())
-        y_max = max(self.data[1].max(), self.model.means_[:, 1].max())
-        
-        # Add 10% padding
-        x_padding = (x_max - x_min) * 0.1
-        y_padding = (y_max - y_min) * 0.1
-        
-        for i in range(len(self.model.means_)):
-            # Plot mean
-            ax.scatter(self.model.means_[i, 0], self.model.means_[i, 1],
-                      c=f'C{i}', s=200, marker='x', linewidth=3)
-            
-            # Add text label
-            ax.text(self.model.means_[i, 0], self.model.means_[i, 1],
-                   f' {i}', fontsize=14, color=f'C{i}', fontweight='bold')
-            
-            # Plot covariance ellipse
-            eigenvals, eigenvecs = np.linalg.eigh(self.model.covars_[i])
-            angle = np.degrees(np.arctan2(eigenvecs[1, 0], eigenvecs[0, 0]))
-            width, height = 4 * np.sqrt(eigenvals)
-            ellip = Ellipse(self.model.means_[i], width, height, angle,
-                          facecolor='none', edgecolor=f'C{i}',
-                          alpha=0.8, linestyle='--')
-            plt.gca().add_patch(ellip)
-            
-        plt.xlabel("I [mV]")
-        plt.ylabel("Q [mV]")
-        plt.xlim(x_min - x_padding, x_max + x_padding)
-        plt.ylim(y_min - y_padding, y_max + y_padding)
-        plt.grid(True, alpha=0.3)
-        plt.gca().set_aspect('equal')
-        plt.savefig(os.path.join(self.results_dir, f"{plot_name}.png"))
-        plt.close()
+        # Prepare GMM result dict from self.model
+        # Calculate populations for the trained model
+        data = self.data.T if self.data.shape[0] == 2 else self.data
+        if hasattr(self.model, 'predict'):
+            labels = self.model.predict(data)
+            populations = np.zeros(self.model.means_.shape[0], dtype=int)
+            for i in range(self.model.means_.shape[0]):
+                populations[i] = np.sum(labels == i)
+        else:
+            labels = None
+            populations = None
+        gmm_result = {
+            'means': self.model.means_,
+            'covariances': self.model.covars_,
+            'labels': labels,
+            'populations': populations,
+            'model': self.model
+        }
+        save_path = os.path.join(self.results_dir, f"{plot_name}.png")
+        plot_gmm_results(
+            self.data,
+            gmm_result,
+            title="I-Q Data with Gaussian Mixture Model\nMeans and 2σ Covariance Ellipses",
+            xlabel="I [mV]",
+            ylabel="Q [mV]",
+            bins=80,
+            cmap='Greys',
+            figsize=(12, 10),
+            save_path=save_path,
+            show=False
+        )
         
     def plot_lifetime_histogram(self, lifetimes: Dict[int, np.ndarray], 
                               state: int, atten: int, bins: int = 200) -> None:
@@ -349,7 +340,9 @@ class HMMAnalyzer:
 
     def save_analysis_results(self, states: np.ndarray, atten: int, 
                             means_guess: Optional[np.ndarray] = None,
-                            covars_guess: Optional[np.ndarray] = None) -> None:
+                            covars_guess: Optional[np.ndarray] = None,
+                            populations: Optional[np.ndarray] = None,
+                            labels: Optional[np.ndarray] = None) -> None:
         """
         Save all analysis results and plots to a results directory.
         
@@ -402,7 +395,7 @@ class HMMAnalyzer:
             json.dump(results, f, indent=4)
             
         # Generate and save plots
-        self._save_analysis_plots(results_dir, states, means_guess, covars_guess)
+        self._save_analysis_plots(results_dir, states, means_guess, covars_guess, labels, populations)
 
         # Save model
         self.save_model(f"model_{self.num_modes}_modes.pkl")
@@ -413,7 +406,9 @@ class HMMAnalyzer:
 
     def _save_analysis_plots(self, results_dir: str, states: np.ndarray,
                            means_guess: Optional[np.ndarray] = None,
-                           covars_guess: Optional[np.ndarray] = None) -> None:
+                           covars_guess: Optional[np.ndarray] = None,
+                           labels: Optional[np.ndarray] = None,
+                           populations: Optional[np.ndarray] = None) -> None:
         """
         Save all analysis plots to the results directory.
         
@@ -439,18 +434,22 @@ class HMMAnalyzer:
             result_guess = {
                 'means': means_guess,
                 'covariances': covars_guess,
-                'labels': None,
-                'populations': None,
+                'labels': labels,
+                'populations': populations,
                 'model': None
             }
             plot_gmm_results(self.data, result_guess, title="Initial Means and Covariances", save_path=os.path.join(results_dir, "data_with_initial_parameters.png"), show=False)
         
         # 3. Data with trained means and covariances
+        labels = self.model.predict(self.data)
+        populations = np.zeros(self.model.means_.shape[0], dtype=int)
+        for i in range(self.model.means_.shape[0]):
+            populations[i] = np.sum(labels == i)
         result_trained = {
             'means': self.model.means_,
             'covariances': self.model.covars_,
-            'labels': None,
-            'populations': None,
+            'labels': labels,
+            'populations': populations,
             'model': self.model
         }
         plot_gmm_results(self.data, result_trained, title="Trained Means and Covariances", save_path=os.path.join(results_dir, "data_with_trained_parameters.png"), show=False)
@@ -696,6 +695,8 @@ class RefHMMAnalyzer(HMMAnalyzer):
         result = get_means_covars(self.data, num_modes)
         means_guess = result['means']
         covars_guess = result['covariances']
+        populations = result['populations']
+        labels = result['labels']
         # Initialize and fit model
         self.initialize_model(means_guess, covars_guess)
         self.fit_model()
@@ -711,7 +712,7 @@ class RefHMMAnalyzer(HMMAnalyzer):
         )
         os.makedirs(save_dir, exist_ok=True)
         self.results_dir = save_dir
-        self.save_analysis_results(states, DA, means_guess, covars_guess)
+        self.save_analysis_results(states, None, means_guess, covars_guess, populations, labels)
         # Calculate SNRs
         snrs = self.calculate_snrs()
         print("SNRs:", snrs)

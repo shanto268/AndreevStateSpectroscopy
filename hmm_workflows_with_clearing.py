@@ -261,7 +261,8 @@ def clearing_power_sweep_workflow(
     num_modes=2,
     int_time=2,
     sample_rate=10,
-    analyzer_class=None
+    analyzer_class=None,
+    atten=None
 ):
     """
     Workflow for sweeping through clearing powers at a selected frequency.
@@ -319,6 +320,8 @@ def clearing_power_sweep_workflow(
             result = get_means_covars(data_mV, num_modes)
             means_guess = result['means']
             covars_guess = result['covariances']
+            labels = result['labels']
+            populations = result['populations']
         else:
             means_guess = prev_means
             covars_guess = prev_covars
@@ -352,7 +355,7 @@ def clearing_power_sweep_workflow(
 
         # Save results and figures
         save_full_analysis(
-            analyzer, states, means_guess, covars_guess, results_dir, figures_dir, uid, atten=extract_power(folder)
+            analyzer, states, means_guess, covars_guess, labels, populations, results_dir, figures_dir, uid, atten
         )
 
         # Prepare for next iteration
@@ -367,7 +370,7 @@ def clearing_power_sweep_workflow(
     print("\nWorkflow complete.")
 
 def save_full_analysis(
-    analyzer, states, means_guess, covars_guess, results_dir, figures_dir, uid, atten=None
+    analyzer, states, means_guess, covars_guess, labels, populations, results_dir, figures_dir, uid, atten=None
 ):
     """
     Save all analysis results, plots, and model for a single run.
@@ -394,39 +397,4 @@ def save_full_analysis(
         json.dump(results, f, indent=4)
 
     # Save figures
-    # 1. Histogram of processed data
-    plt.figure(figsize=(10, 8))
-    qp.plotComplexHist(analyzer.data[0], analyzer.data[1], figsize=[10, 8])
-    plt.title(f"DA: {atten} dB | Integration Time: {getattr(analyzer, 'int_time', '?')} μs")
-    plt.savefig(os.path.join(figures_dir, f"data_histogram_{uid}.png"))
-    plt.close()
-
-    # 2. Data with initial means and covariances
-    if means_guess is not None and covars_guess is not None:
-        plt.figure(figsize=(10, 8))
-        ax = qp.plotComplexHist(analyzer.data[0], analyzer.data[1], figsize=[10, 8])
-        analyzer._plot_means_and_covars(ax, means_guess, covars_guess, "Initial")
-        plt.savefig(os.path.join(figures_dir, f"data_with_initial_parameters_{uid}.png"))
-        plt.close()
-
-    # 3. Data with trained means and covariances
-    plt.figure(figsize=(10, 8))
-    ax = qp.plotComplexHist(analyzer.data[0], analyzer.data[1], figsize=[10, 8])
-    analyzer._plot_means_and_covars(ax, analyzer.model.means_, analyzer.model.covars_, "Trained")
-    plt.savefig(os.path.join(figures_dir, f"data_with_trained_parameters_{uid}.png"))
-    plt.close()
-
-    # 4. Timeseries slices (optional, as in your code)
-    change_indices = np.where(np.diff(states) != 0)[0] + 1
-    if len(change_indices) >= 2:
-        i = np.random.choice(len(change_indices) - 1)
-        j = i + np.random.randint(1, 6)
-        try:
-            analyzer._plot_timeseries_slice(states, change_indices[i]-5, change_indices[i]+5,
-                                      f"short_transition_{uid}", figures_dir)
-        except Exception as e:
-            analyzer._plot_timeseries_slice(states, change_indices[i], change_indices[i]+5,
-                                      f"short_transition_{uid}", figures_dir)
-        if i + 1 < len(change_indices):
-            analyzer._plot_timeseries_slice(states, change_indices[i], change_indices[j],
-                                      f"between_transitions_{uid}", figures_dir)
+    analyzer._save_analysis_plots(figures_dir, states, means_guess, covars_guess, labels, populations)

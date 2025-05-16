@@ -354,9 +354,12 @@ def plot_gmm_results(
     # Plot means and covariance ellipses
     for i in range(len(gmm_result['means'])):
         # Plot mean
+        pop_label = ''
+        if gmm_result.get('populations') is not None:
+            pop_label = f'\n(n={gmm_result["populations"][i]})'
         plt.scatter(gmm_result['means'][i, 0], gmm_result['means'][i, 1], 
                    c=f'C{i}', s=200, marker='x', linewidth=3,
-                   label=f'State {i}\n(n={gmm_result["populations"][i]})')
+                   label=f'State {i}{pop_label}')
         
         # Add text label
         plt.text(gmm_result['means'][i, 0], gmm_result['means'][i, 1], 
