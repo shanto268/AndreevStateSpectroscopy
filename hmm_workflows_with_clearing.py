@@ -275,7 +275,7 @@ def clearing_power_sweep_workflow(
         int_time: integration time
         sample_rate: sample rate in MHz
         analyzer_class: class to use for HMM analysis (should be HMMAnalyzer or subclass)
-    Implements robust resume logic: if interrupted, resumes from the next unprocessed folder using the last model's means/covars.
+    Implements robust resume logic: if interrupted, resumes from the next unprocessed folder using the last model's means/covars, or user input.
     """
     if analyzer_class is None:
         from hmm_analysis import HMMAnalyzer
@@ -310,21 +310,30 @@ def clearing_power_sweep_workflow(
             break  # Found the first unprocessed folder
 
     if first_unprocessed_idx >= len(folders):
-        print("All folders already processed. Nothing to do.")
+        print(f"All folders already processed for freq {selected_freq}. Nothing to do.")
         return
 
-    # If at least one folder is processed, load last means/covars
+    # If at least one folder is processed, ask user if they want to use last means/covars
+    use_last_model = False
     if last_model_path is not None:
-        try:
-            import pickle
-            with open(last_model_path, "rb") as f:
-                model = pickle.load(f)
-            last_means = model.means_
-            last_covars = model.covars_
-            print(f"Resuming from {folders[first_unprocessed_idx]} using means/covars from {last_model_path}")
-        except Exception as e:
-            print(f"Could not load model from {last_model_path}: {e}")
-            print("Falling back to human input for means/covars on next folder.")
+        print(f"A previous model was found at {last_model_path}.")
+        user_input = input("Do you want to use its means/covars to initialize the next HMM? (y/n): ").strip().lower()
+        if user_input in ["y", "yes"]:
+            try:
+                import pickle
+                with open(last_model_path, "rb") as f:
+                    model = pickle.load(f)
+                last_means = model.means_
+                last_covars = model.covars_
+                use_last_model = True
+                print(f"Resuming from {folders[first_unprocessed_idx]} using means/covars from {last_model_path}")
+            except Exception as e:
+                print(f"Could not load model from {last_model_path}: {e}")
+                print("Falling back to human input for means/covars on next folder.")
+                last_means = None
+                last_covars = None
+        else:
+            print("You chose to input means/covars manually for the next folder.")
             last_means = None
             last_covars = None
     else:
@@ -332,6 +341,9 @@ def clearing_power_sweep_workflow(
 
     prev_means = last_means
     prev_covars = last_covars
+
+    processed_count = 0
+    skipped_count = first_unprocessed_idx
 
     for folder in folders[first_unprocessed_idx:]:
         print(f"\nProcessing folder: {folder}")
@@ -395,8 +407,9 @@ def clearing_power_sweep_workflow(
         del data_mV
         del analyzer
         gc.collect()
+        processed_count += 1
 
-    print("\nWorkflow complete.")
+    print(f"\nWorkflow complete for freq {selected_freq}. Processed {processed_count} folders, skipped {skipped_count}.")
 
 def save_full_analysis(
     analyzer, states, means_guess, covars_guess, labels, populations, results_dir, figures_dir, uid, atten=None
