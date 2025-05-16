@@ -1,14 +1,33 @@
+import glob
 import os
+import re
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 
 from hmm_workflows_with_clearing import clearing_power_sweep_workflow
 
 # === USER PARAMETERS ===
 # Set these before running!
-base_path = "/Users/shanto/LFL/AndreevStateSpectroscopy"  # <-- Edit as needed
-# clearing_data_dict should be constructed as in your notebook/code
-clearing_data_dict = {}  # <-- Fill this with your actual dictionary
-freqs = [9.0, 9.5, 10.0, 10.5]  # <-- List of frequencies to process
+base_path = r"E:\Shared drives\LFL\Projects\Quasiparticles\Andreev_Spectroscopy\051525\L1A_RUN2\phi_0p490\DA30_SR10"
+
+# 1. Find all folders matching the convention
+pattern = os.path.join(base_path, "clearing_*GHz_*dBm")
+clearing_data_files = [f for f in glob.glob(pattern) if os.path.isdir(f)]
+
+# 2. Build the dictionary
+clearing_data_dict = defaultdict(list)
+freq_pattern = re.compile(r"clearing_(\d+)p(\d+)GHz_")
+
+for folder in clearing_data_files:
+    match = freq_pattern.search(os.path.basename(folder))
+    if match:
+        freq_str = f"{match.group(1)}.{match.group(2)}"
+        freq_float = float(freq_str)
+        clearing_data_dict[freq_float].append(folder)
+
+clearing_data_dict = dict(clearing_data_dict)
+
+freqs = [9.0, 8.5, 10.0, 8]
 num_modes = 2
 int_time = 2
 sample_rate = 10
