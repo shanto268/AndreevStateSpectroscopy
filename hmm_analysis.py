@@ -522,7 +522,7 @@ class HMMAnalyzer:
         y_padding = (y_max - y_min) * 0.1
         fig, ax = plt.subplots(2, 1, figsize=[9, 6])
         ax[0].plot(time[start_idx:end_idx], states[start_idx:end_idx], label='HMM')
-        ax[0].set_title(f"Average Occupation: {states.mean():.3f}")
+        ax[0].set_title(f"Average Occupation: {states.mean():.6f}")
         ax[0].legend()
         ax[0].set_ylabel('Occupation')
         ax[1].set_ylabel('mV')
