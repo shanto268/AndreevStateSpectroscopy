@@ -5,6 +5,7 @@ This module provides functionality for analyzing Andreev state spectroscopy data
 using Hidden Markov Models (HMM).
 """
 
+import gc  # Add this import at the top of your file
 import glob
 import json
 import os
@@ -16,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 from hmmlearn import hmm
+from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Ellipse
 
 import quasiparticleFunctions as qp
@@ -511,6 +513,186 @@ class HMMAnalyzer:
         ax[1].set_ylim(y_min - y_padding, y_max + y_padding)
         plt.savefig(os.path.join(results_dir, f"timeseries_{name}.png"))
         plt.close()
+
+class RefHMMAnalyzer(HMMAnalyzer):
+    def process_ref_folders(self, ref_folders, num_modes=2, int_time=2, sample_rate=10):
+        """
+        Process all .bin files in the given reference folders using the standard single-power workflow.
+        """
+        results = []
+        for folder in ref_folders:
+            bin_files = glob.glob(os.path.join(folder, "*.bin"))
+            if not bin_files:
+                print(f"No .bin file found in {folder}")
+                continue
+            bin_file = bin_files[0]
+            print(f"Processing {bin_file}")
+
+            # Set up analyzer for this file
+            self.data_files = [bin_file]
+            self.attenuations = [None]
+            self.data_dir = folder
+            self.figure_path = os.path.join(folder, "Figures")
+            os.makedirs(self.figure_path, exist_ok=True)
+
+            # Load and process data
+            data_og = qp.loadAlazarData(bin_file)
+            data_downsample, self.sample_rate = qp.BoxcarDownsample(
+                data_og, int_time, sample_rate, returnRate=True
+            )
+            self.data = qp.uint16_to_mV(data_downsample)
+
+            # Get initial parameters
+            result = get_means_covars(self.data, num_modes)
+            means_guess = result['means']
+            covars_guess = result['covariances']
+
+            # Initialize and fit model
+            self.initialize_model(means_guess, covars_guess)
+            self.fit_model()
+
+            # Decode states and calculate probabilities
+            logprob, states = self.decode_states()
+            mean_occ, probs = self.calculate_occupation_probabilities(states)
+            print(f"Mean occupation: {mean_occ}")
+            print(f"Probabilities: {probs}")
+
+            # Save all results and plots
+            self.save_analysis_results(states, None, means_guess, covars_guess)
+
+            # Calculate SNRs
+            snrs = self.calculate_snrs()
+            print("SNRs:", snrs)
+
+            results.append({
+                "bin_file": bin_file,
+                "mean_occ": mean_occ,
+                "probs": probs,
+                "snrs": snrs
+            })
+
+            # Memory cleanup
+            del data_og
+            del data_downsample
+            del self.data
+            gc.collect()
+        return results
+
+    def plot_ref_files_to_pdf(self, ref_files, int_time=2, sample_rate=10):
+        """
+        Args:
+            ref_files: list of folder paths, each containing a .bin file
+            int_time: integration time in microseconds
+            sample_rate: sample rate in MHz
+        For each folder in ref_files, load the .bin file, plot self.data, and save all plots to a single PDF.
+        The plot title will be the folder name (e.g., no_clearing_REF_for_10p00GHz).
+        The PDF will be saved in .../Figures/RefFiles with a unique timestamped filename.
+        """
+        # Set up save directory
+        save_dir = os.path.join(
+            os.path.dirname(os.path.dirname(ref_files[0])),  # up two levels from a ref file
+            "Figures", "RefFiles"
+        )
+        os.makedirs(save_dir, exist_ok=True)
+        # Unique filename
+        uid = datetime.now().strftime("%H%M%S-%m%d%Y")
+        pdf_path = os.path.join(save_dir, f"ref_files_{uid}.pdf")
+
+        with PdfPages(pdf_path) as pdf:
+            for folder in ref_files:
+                bin_files = glob.glob(os.path.join(folder, "*.bin"))
+                if not bin_files:
+                    print(f"No .bin file found in {folder}")
+                    continue
+                bin_file = bin_files[0]
+                # Load data
+                data_og = qp.loadAlazarData(bin_file)
+                data_downsample, self.sample_rate = qp.BoxcarDownsample(
+                        data_og, int_time, sample_rate, returnRate=True
+                )
+                self.data = qp.uint16_to_mV(data_downsample)
+                # Plot
+                plt.figure(figsize=(10, 6))
+                plt.plot(self.data[0], label='I')
+                plt.plot(self.data[1], label='Q')
+                plt.title(os.path.basename(folder))
+                plt.xlabel("Sample")
+                plt.ylabel("mV")
+                plt.legend()
+                plt.tight_layout()
+                pdf.savefig()
+                plt.close()
+                # Explicitly delete large arrays and collect garbage
+                del data_og
+                del data_downsample
+                del self.data
+                gc.collect()
+        print(f"Saved all reference plots to {pdf_path}")
+
+    def process_ref_file_by_index(self, ref_files, index, num_modes=2, int_time=2, sample_rate=10):
+        """
+        Process a single .bin file in ref_files by index using the standard single-power workflow.
+        Args:
+            ref_files: list of folder paths, each containing a .bin file
+            index: integer index into ref_files
+            num_modes: number of HMM modes
+            int_time: integration time
+            sample_rate: sample rate in MHz
+        """
+        if not (0 <= index < len(ref_files)):
+            print(f"Invalid index {index}. Allowed values: 0 to {len(ref_files)-1}")
+            print("Available files:")
+            for i, folder in enumerate(ref_files):
+                print(f"  [{i}]: {folder}")
+            return
+        folder = ref_files[index]
+        print(f"Processing index {index}: {folder}")
+        bin_files = glob.glob(os.path.join(folder, "*.bin"))
+        if not bin_files:
+            print(f"No .bin file found in {folder}")
+            return
+        bin_file = bin_files[0]
+        print(f"  Using .bin file: {bin_file}")
+        # Set up analyzer for this file
+        self.data_files = [bin_file]
+        self.attenuations = [None]
+        self.data_dir = folder
+        self.figure_path = os.path.join(folder, "Figures")
+        os.makedirs(self.figure_path, exist_ok=True)
+        # Load and process data
+        data_og = qp.loadAlazarData(bin_file)
+        data_downsample, self.sample_rate = qp.BoxcarDownsample(
+            data_og, int_time, sample_rate, returnRate=True
+        )
+        self.data = qp.uint16_to_mV(data_downsample)
+        # Get initial parameters
+        result = get_means_covars(self.data, num_modes)
+        means_guess = result['means']
+        covars_guess = result['covariances']
+        # Initialize and fit model
+        self.initialize_model(means_guess, covars_guess)
+        self.fit_model()
+        # Decode states and calculate probabilities
+        logprob, states = self.decode_states()
+        mean_occ, probs = self.calculate_occupation_probabilities(states)
+        print(f"Mean occupation: {mean_occ}")
+        print(f"Probabilities: {probs}")
+        # Save all results and plots in RefFiles directory
+        save_dir = os.path.join(
+            os.path.dirname(os.path.dirname(folder)),
+            "Figures", "RefFiles"
+        )
+        os.makedirs(save_dir, exist_ok=True)
+        self.results_dir = save_dir
+        self.save_analysis_results(states, None, means_guess, covars_guess)
+        # Calculate SNRs
+        snrs = self.calculate_snrs()
+        print("SNRs:", snrs)
+        # Memory cleanup
+        del data_og
+        del data_downsample
+        del self.data
+        gc.collect()
 
 def main():
     """Example usage of the HMMAnalyzer class."""

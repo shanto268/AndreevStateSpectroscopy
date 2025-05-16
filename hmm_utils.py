@@ -93,7 +93,7 @@ def get_user_state_ordering(
         The data points
     gmm_result : Dict[str, Any]
         GMM results dictionary
-    title : str
+    title : str, optional
         Plot title
         
     Returns
@@ -1534,7 +1534,28 @@ def compress_and_delete_folder(folder_path: str) -> str:
                 pass
         raise e
 
-def process_bad_datasets_parallel(base_path: str, bad_datasets: dict, num_processes: int = None) -> None:
+def process_single_folder(folder_path: str) -> Tuple[str, bool]:
+    try:
+        print("Checking:", folder_path)
+        zip_path = compress_and_delete_folder(folder_path)
+        return (folder_path, True)
+    except Exception as e:
+        print(f"Error processing {folder_path}: {e}")
+        return (folder_path, False)
+
+def get_folder_size(path):
+    """Return total size of files in a folder (in bytes)."""
+    import os
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if os.path.isfile(fp):
+                total += os.path.getsize(fp)
+    return total
+
+
+def process_bad_datasets_parallel(base_path: str, bad_datasets: dict, num_processes: int = None, test: bool = False) -> None:
     """
     Process multiple folders in parallel using multiprocessing.
     
@@ -1546,30 +1567,25 @@ def process_bad_datasets_parallel(base_path: str, bad_datasets: dict, num_proces
         Dictionary mapping frequencies to lists of attenuation values
     num_processes : int, optional
         Number of parallel processes to use. If None, uses CPU count - 1
+    test : bool, optional
+        If True, only print the directories that would be processed, do not compress or delete anything
     """
     import multiprocessing as mp
     import os
     from pathlib import Path
-    
-    def process_single_folder(folder_path: str) -> tuple[str, bool]:
-        """Helper function to process a single folder and return success status"""
-        try:
-            zip_path = compress_and_delete_folder(folder_path)
-            return (folder_path, True)
-        except Exception as e:
-            print(f"Error processing {folder_path}: {e}")
-            return (folder_path, False)
-    
+    from typing import Tuple
+
     # Convert base path to Path object
     base_path = Path(base_path)
     
     # Prepare list of all folders to process
     folders_to_process = []
     for freq, attens in bad_datasets.items():
+        freq_str = format_freq(freq)
         for atten in attens:
-            # Construct folder path
-            folder_name = f"clearing_{freq}GHz_{atten}p0dBm"
-            folder_path = base_path / f"phi_0p490" / f"DA30_SR10" / folder_name
+            folder_name = f"clearing_{freq_str}GHz_{atten}p0dBm"
+            folder_path = base_path / folder_name
+            print("Checking:", folder_path)
             if folder_path.exists():
                 folders_to_process.append(str(folder_path))
     
@@ -1578,6 +1594,18 @@ def process_bad_datasets_parallel(base_path: str, bad_datasets: dict, num_proces
         return
     
     print(f"Found {len(folders_to_process)} folders to process")
+    
+    if test:
+        print("Test mode enabled. The following directories would be compressed and deleted:")
+        for folder in folders_to_process:
+            print(folder)
+        print("No folders were actually compressed or deleted.")
+        return
+    
+    # Calculate total size of all folders before compression
+    total_original_size = 0
+    for folder in folders_to_process:
+        total_original_size += get_folder_size(folder)
     
     # Determine number of processes
     if num_processes is None:
@@ -1591,22 +1619,93 @@ def process_bad_datasets_parallel(base_path: str, bad_datasets: dict, num_proces
     successful = [path for path, success in results if success]
     failed = [path for path, success in results if not success]
     
+    # Calculate total size of all created zip files
+    total_zip_size = 0
+    for folder in successful:
+        zip_path = Path(folder).with_suffix('.zip')
+        if zip_path.exists():
+            total_zip_size += os.path.getsize(zip_path)
+    
+    storage_saved = total_original_size - total_zip_size
+    storage_saved_gb = storage_saved / (1024**3)
+    
     print(f"\nProcessing complete!")
     print(f"Successfully processed: {len(successful)} folders")
     if failed:
         print(f"Failed to process: {len(failed)} folders")
         for path in failed:
             print(f"  - {path}")
+    print(f"Total storage saved: {storage_saved_gb:.2f} GB")
 
-# Example usage:
-if __name__ == "__main__":
-    # Example bad datasets dictionary
-    bad_datasets = {
-        "9.5": [-7,-6,-5],
-        "8": [-5],
-        "7.5": [-5, -6, -7, -8, -9, -10, -11, -12, -13, -14, -15, -16, -17, -18, -19],
-        "7": [-5, -6, -7, -8, -9, -10, -11, -12, -13, -14, -15],
-        "6.5": [-5, -6, -7, -8, -9, -10, -11, -12, -13, -14, -15, -16, -17, -18, -19, -20, -21],
-    }
-    
-    # Base path where the folders are located
+def format_freq(freq):
+    # Convert string like "8" or "7.5" to "8p00" or "7p50"
+    f = float(freq)
+    return f"{f:.2f}".replace('.', 'p')
+
+def compress_and_delete_folders_from_list(folder_list, num_processes=None, test=False):
+    """
+    Compress and delete all folders in the given list, optionally in parallel.
+
+    Parameters
+    ----------
+    folder_list : list of str
+        List of folder paths to compress and delete.
+    num_processes : int, optional
+        Number of parallel processes to use. If None, uses CPU count - 1.
+    test : bool, optional
+        If True, only print the directories that would be processed, do not compress or delete anything.
+    """
+    import multiprocessing as mp
+    import os
+    from pathlib import Path
+
+    # Prepare list of all folders to process
+    folders_to_process = [str(Path(f)) for f in folder_list if Path(f).exists() and Path(f).is_dir()]
+
+    if not folders_to_process:
+        print("No folders found to process!")
+        return
+
+    print(f"Found {len(folders_to_process)} folders to process")
+
+    if test:
+        print("Test mode enabled. The following directories would be compressed and deleted:")
+        for folder in folders_to_process:
+            print(folder)
+        print("No folders were actually compressed or deleted.")
+        return
+
+    # Calculate total size of all folders before compression
+    total_original_size = 0
+    for folder in folders_to_process:
+        total_original_size += get_folder_size(folder)
+
+    # Determine number of processes
+    if num_processes is None:
+        num_processes = max(1, mp.cpu_count() - 1)
+
+    # Process folders in parallel
+    with mp.Pool(processes=num_processes) as pool:
+        results = pool.map(process_single_folder, folders_to_process)
+
+    # Report results
+    successful = [path for path, success in results if success]
+    failed = [path for path, success in results if not success]
+
+    # Calculate total size of all created zip files
+    total_zip_size = 0
+    for folder in successful:
+        zip_path = Path(folder).with_suffix('.zip')
+        if zip_path.exists():
+            total_zip_size += os.path.getsize(zip_path)
+
+    storage_saved = total_original_size - total_zip_size
+    storage_saved_gb = storage_saved / (1024**3)
+
+    print(f"\nProcessing complete!")
+    print(f"Successfully processed: {len(successful)} folders")
+    if failed:
+        print(f"Failed to process: {len(failed)} folders")
+        for path in failed:
+            print(f"  - {path}")
+    print(f"Total storage saved: {storage_saved_gb:.2f} GB")
