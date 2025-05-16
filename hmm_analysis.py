@@ -376,6 +376,9 @@ class HMMAnalyzer:
         snrs = self.calculate_snrs()
         rates = self.calculate_transition_rates()
         
+        # After fitting the model, before saving results:
+        converged = getattr(self.model.monitor_, "converged_", None)
+        
         # Prepare results dictionary
         results = {
             "DA": int(atten) if atten is not None else None,
@@ -389,7 +392,8 @@ class HMMAnalyzer:
                             for j in range(self.num_modes)},
             "attenuation": int(atten) if atten is not None else None,
             "num_modes": int(self.num_modes),
-            "downSample_rate_MHz": float(self.sample_rate)
+            "downSample_rate_MHz": float(self.sample_rate),
+            "converged": converged
         }
         
         # Save results to JSON
