@@ -4,7 +4,16 @@ import re
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 
+from dotenv import load_dotenv
+
 from hmm_workflows_with_clearing import clearing_power_sweep_workflow
+from slack_notifier import SlackNotifier
+
+# Load environment variables
+load_dotenv()
+SLACK_TOKEN = os.getenv("SLACK_TOKEN")
+SLACK_USER_ID = os.getenv("SLACK_USER_ID") 
+notifier = SlackNotifier(SLACK_TOKEN) if SLACK_TOKEN else None
 
 # === USER PARAMETERS ===
 # Set these before running!
@@ -47,6 +56,12 @@ def run_for_freq(selected_freq):
         atten=atten
     )
     print(f"Finished analysis for freq: {selected_freq}")
+    # Send Slack notification for this analysis
+    if notifier and SLACK_USER_ID:
+        try:
+            notifier.send_message(SLACK_USER_ID, f"Analysis for freq {selected_freq} complete.")
+        except Exception as e:
+            print(f"[SlackNotifier] Failed to send notification: {e}")
     return result
 
 if __name__ == "__main__":
@@ -54,4 +69,10 @@ if __name__ == "__main__":
     print(f"Running with {num_workers} parallel workers...")
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         results = list(executor.map(run_for_freq, freqs))
-    print("All analyses complete.") 
+    print("All analyses complete.")
+    # Send Slack notification for workflow completion
+    if notifier and SLACK_USER_ID:
+        try:
+            notifier.send_message(SLACK_USER_ID, "All analyses complete.")
+        except Exception as e:
+            print(f"[SlackNotifier] Failed to send notification: {e}") 

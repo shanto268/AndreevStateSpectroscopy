@@ -65,3 +65,4 @@ venv.bak/
 Figures/
 hmm_single_power.py
 HMM_singlePower.ipynb
+.env
