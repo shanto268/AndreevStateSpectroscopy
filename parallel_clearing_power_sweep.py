@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+import traceback
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 
@@ -9,10 +10,10 @@ from dotenv import load_dotenv
 from hmm_workflows_with_clearing import clearing_power_sweep_workflow
 from slack_notifier import SlackNotifier
 
-# Load environment variables
+# Load environment variableVs
 load_dotenv()
 SLACK_TOKEN = os.getenv("SLACK_TOKEN")
-SLACK_USER_ID = os.getenv("SLACK_USER_ID") 
+SLACK_USER_ID = os.getenv("SHANTO") 
 notifier = SlackNotifier(SLACK_TOKEN) if SLACK_TOKEN else None
 
 # === USER PARAMETERS ===
@@ -36,7 +37,8 @@ for folder in clearing_data_files:
 
 clearing_data_dict = dict(clearing_data_dict)
 
-freqs = [9.0, 8.5, 10.0, 8]
+freqs = [6.5, 7, 7.5, 10.5, 11]
+#freqs=[11.5,12,12.5,13]
 num_modes = 2
 int_time = 2
 sample_rate = 10
@@ -45,34 +47,55 @@ atten = 30  # or None if not needed
 # === END USER PARAMETERS ===
 
 def run_for_freq(selected_freq):
-    print(f"Starting analysis for freq: {selected_freq}")
-    result = clearing_power_sweep_workflow(
-        base_path,
-        clearing_data_dict,
-        selected_freq,
-        num_modes=num_modes,
-        int_time=int_time,
-        sample_rate=sample_rate,
-        atten=atten
-    )
-    print(f"Finished analysis for freq: {selected_freq}")
-    # Send Slack notification for this analysis
-    if notifier and SLACK_USER_ID:
-        try:
-            notifier.send_message(SLACK_USER_ID, f"Analysis for freq {selected_freq} complete.")
-        except Exception as e:
-            print(f"[SlackNotifier] Failed to send notification: {e}")
-    return result
+    try:
+        print(f"Starting analysis for freq: {selected_freq}")
+        result = clearing_power_sweep_workflow(
+            base_path,
+            clearing_data_dict,
+            selected_freq,
+            num_modes=num_modes,
+            int_time=int_time,
+            sample_rate=sample_rate,
+            atten=atten
+        )
+        print(f"Finished analysis for freq: {selected_freq}")
+        # Send Slack notification for this analysis
+        if notifier and SLACK_USER_ID:
+            try:
+                notifier.send_message(SLACK_USER_ID, f"Analysis for freq {selected_freq} complete.")
+            except Exception as e:
+                print(f"[SlackNotifier] Failed to send notification: {e}")
+        return result
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[ERROR] Analysis for freq {selected_freq} failed:\n{tb}")
+        if notifier and SLACK_USER_ID:
+            try:
+                notifier.send_message(SLACK_USER_ID, f"[ERROR] Analysis for freq {selected_freq} failed:\n{tb}")
+            except Exception as e2:
+                print(f"[SlackNotifier] Failed to send error notification: {e2}")
+        raise
 
 if __name__ == "__main__":
-    num_workers = max(1, os.cpu_count() - 1)
-    print(f"Running with {num_workers} parallel workers...")
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        results = list(executor.map(run_for_freq, freqs))
-    print("All analyses complete.")
-    # Send Slack notification for workflow completion
-    if notifier and SLACK_USER_ID:
-        try:
-            notifier.send_message(SLACK_USER_ID, "All analyses complete.")
-        except Exception as e:
-            print(f"[SlackNotifier] Failed to send notification: {e}") 
+    try:
+        if notifier and SLACK_USER_ID:
+            notifier.send_message(SLACK_USER_ID, "Starting analysis...")
+        num_workers = max(1, os.cpu_count() - 1)
+        print(f"Running with {num_workers} parallel workers...")
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            results = list(executor.map(run_for_freq, freqs))
+        print("All analyses complete.")
+        # Send Slack notification for workflow completion
+        if notifier and SLACK_USER_ID:
+            try:
+                notifier.send_message(SLACK_USER_ID, "All analyses complete.")
+            except Exception as e:
+                print(f"[SlackNotifier] Failed to send notification: {e}")
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[ERROR] Workflow failed:\n{tb}")
+        if notifier and SLACK_USER_ID:
+            try:
+                notifier.send_message(SLACK_USER_ID, f"[ERROR] Workflow failed:\n{tb}")
+            except Exception as e2:
+                print(f"[SlackNotifier] Failed to send error notification: {e2}") 

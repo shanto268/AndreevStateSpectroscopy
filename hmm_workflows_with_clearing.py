@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import pickle
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -288,7 +289,6 @@ def clearing_power_sweep_workflow(
 
     # Sort folders by power (extract from folder name)
     def extract_power(folder):
-        import re
         m = re.search(r'_(\-?\d+)p(\d+)dBm', folder)
         if m:
             return float(f"{m.group(1)}.{m.group(2)}")
@@ -320,7 +320,6 @@ def clearing_power_sweep_workflow(
         user_input = input("Do you want to use its means/covars to initialize the next HMM? (y/n): ").strip().lower()
         if user_input in ["y", "yes"]:
             try:
-                import pickle
                 with open(last_model_path, "rb") as f:
                     model = pickle.load(f)
                 last_means = model.means_
